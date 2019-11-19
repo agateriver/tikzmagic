@@ -7,10 +7,13 @@ A Jupyter extension for compiling and displaying images described by the [TikZ](
 - IPython/Jupyter
 - LaTeX (`xelatex`)
 - ImageMagick
+- Ghostscript
+
+assure xelatex, magick and ghostscript binary in your path.
 
 ## Installation
 
-```pip install git+git://github.com/robjstan/tikzmagic.git```
+```pip install git+git://github.com/agateriver/tikzmagic.git```
 
 ## Usage
 
