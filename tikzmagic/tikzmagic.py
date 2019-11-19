@@ -7,7 +7,8 @@ import shutil
 import tempfile
 from argparse import ArgumentParser
 from base64 import b64encode
-from os.path import isfile
+import os
+from os.path import exists, isfile, join
 from os import getcwd
 
 from IPython.core.magic import register_line_cell_magic
@@ -20,7 +21,9 @@ LATEX_TEMPLATE = r'''
 {latex_pre}
 \begin{{document}}
 {content}
-\end{{document}}'''
+\end{{document}}
+'''
+
 
 @register_line_cell_magic
 def tikz(line, cell=''):
@@ -43,8 +46,16 @@ def tikz(line, cell=''):
     # prepare latex from template
     if args.input_file:
         # add content from input_file before rest of cell
-        cell += r'\input{{{cwd}/{file}}}'.format(cwd=getcwd(),
-                                                 file=args.input_file)
+        ifile = join(getcwd(), args.input_file)
+        if exists(ifile) and isfile(ifile):
+            if os.name == 'nt':
+                cell += r'\input{%s}' % ifile.replace('\\', '/')
+            else:
+                cell += r'\input{%s}' % ifile
+        else:
+            raise Exception(
+                "tikz: inputfile does not exists in current working directory."
+            )
 
     if args.wrap_env:
         cell = r'\begin{tikzpicture}' + cell + r'\end{tikzpicture}'
@@ -60,46 +71,64 @@ def tikz(line, cell=''):
 
     # add current working directory to any export_file path
     if args.export_file:
-        args.export_file = getcwd() + '/' + args.export_file
+        args.export_file = os.path.join(getcwd(), args.export_file)
 
     # compile and convert, returning Image data
-    return latex2image(latex, int(args.scale*300), args.export_file)
+    return latex2image(latex,
+                       int(args.scale * 300),
+                       args.export_file,
+                       debug=args.debug_mode)
 
-def latex2image(latex, density, export_file=None):
+
+def latex2image(latex, density, export_file=None, debug=False):
     '''Compile LaTeX to PDF, and convert to PNG.'''
     try:
         # make a temp directory, and name temp files
         temp_dir = tempfile.mkdtemp()
-        temp_tex = temp_dir + '/tikzfile.tex'
-        temp_pdf = temp_dir + '/tikzfile.pdf'
-        temp_png = temp_dir + '/tikzfile.png'
+        temp_tex = join(temp_dir, 'tikzfile.tex')
+        temp_pdf = join(temp_dir, 'tikzfile.pdf')
+        temp_png = join(temp_dir, 'tikzfile.png')
 
-        open(temp_tex, 'w').write(latex)
+        with open(temp_tex, 'w') as t:
+            t.write(latex)
         # run LaTeX to generate a PDF
-        sh_latex(in_file=temp_tex, out_dir=temp_dir)
+        sh_latex(in_file=temp_tex, out_dir=temp_dir, debug=debug)
 
         if not isfile(temp_pdf):
-            raise Exception('pdflatex did not produce a PDF file.')
+            raise Exception("xelatex didn't produce a PDF file.")
 
         if export_file:
             shutil.copyfile(temp_pdf, export_file)
 
-         # convert PDF to PNG
-        sh_convert(in_file=temp_pdf, out_file=temp_png, density=density)
-
-        return Image(data=b64encode(open(temp_png, "rb").read()))
+        # convert PDF to PNG
+        sh_convert(in_file=temp_pdf,
+                   out_file=temp_png,
+                   density=density,
+                   debug=debug)
+        return Image(data=open(temp_png, "rb").read())
     finally:
         # remove temp directory
         shutil.rmtree(temp_dir)
 
+
 # functions to run command line scripts
-def sh_latex(in_file, out_dir):
+def sh_latex(in_file, out_dir, debug=False):
     '''Compile XeLaTeX to generate a PDF.'''
+    if debug:
+        print('''subprocess.call(['xelatex', '-output-directory', %s, %s])''' %
+              (out_dir, in_file))
     subprocess.call(['xelatex', '-output-directory', out_dir, in_file])
 
-def sh_convert(in_file, out_file, density=96):
+
+def sh_convert(in_file, out_file, density=96, debug=False):
     '''Use ImageMagick to convert PDF to PNG.'''
-    subprocess.call(['convert', '-density', str(density), in_file, out_file])
+    if debug:
+        print('''magick convert -density "%s" "%s" "%s"''' %
+              (density, in_file, out_file))
+    subprocess.call(
+        ['magick', 'convert', '-density',
+         str(density), in_file, out_file])
+
 
 def load_ipython_extension(ipython):
     '''Load iPython extension. Empty as we don't need to do anything.'''
